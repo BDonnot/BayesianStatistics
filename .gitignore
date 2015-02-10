@@ -1,0 +1,9 @@
+src/*.o
+src/*.so
+src/bwtjune97.rd
+src/slqr.*
+src/utility.*
+src/standard.h
+src/tropcycl.rd
+*.*~
+*.Rhistory
