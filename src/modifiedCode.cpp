@@ -1,71 +1,20 @@
 #include <RcppArmadillo.h>
 //[[Rcpp::depends(RcppArmadillo)]]
 //[[Rcpp::plugins("cpp11")]]
-//using namespace Rcpp;
-//using namespace arma;
 
-// Below is a simple example of exporting a C++ function to R. You can
-// source this function into an R session using the Rcpp::sourceCpp 
-// function (or via the Source button on the editor toolbar)
-
-// For more on using Rcpp click the Help button on the editor toolbar
-
-//#include <vector.h>
-//#include <array.h>
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 
-typedef Rcpp::NumericVector NumericVector;
 typedef arma::vec vect;
 typedef std::vector<vect> twoVect;
 typedef arma::mat matrix;
 typedef std::vector<arma::mat > array3d;
+typedef arma::ivec ivect;
 
-/*
-void freemem(int ndim, ...);
-void ifreemem(int ndim, ...);
-int    fwhich_min(double *x, int n);
-double inprod(double *v1, double *v2, int d);
-double int_simp(double *f, double h, int n);
-double int_romberg(double *f);
-double int_trape(double *f);
-double ldexgam(double x,double shape,double scale);
-double norm2(double *vec, int len);
-double pexgam(double x,double shape,double scale);
-double qexgam(double p,double shape,double scale);
-void quadsolve(double a, double b, double c, double *x, int get_both);
-int    rdisc(int n,double *prob,int islog);
-void r_simple_dirichlet(double *x, int k, double *shape);
-double rexgam(double shape, double scale);
-void   rperm(int size, int *samp, int n);
-void   Rprintvec(char *a, double *x, int len);
-void   Rprintveci(char *a, int *x, int len);
-void   Rprintmat(char *a, double **m, int d1, int d2, int iscol);
-void   Rprintmati(char *a, int **m, int d1, int d2, int iscol);
-double sigmoid(double x);
-double sigmoid2(double x);
-double sum(double *x, int n);
-double sumlog(double *x, int n);
-void swap(double *x, int i, int j);
-void transpose(double **A, int m, int n, double **B);
-void Uprod(double **A, int n, double *x, double *b, int transpose);
-double trace(double **a, int n, int is_log);
-double fracf(double x);
-double fold(double x);
-double logadd(double lx, double ly);
-*/
-
-
-int order, *twopow, grid_len;
-double grid_incr;
-
-int nobs, nnode, ngrid, nsweep, nvar, *nrep, gAnchor;
-double incr, lincr, nuL, muL, nuBp, muBp, nuBa, muBa;
-double muBase, *betBase, sigmaBase, sigmaBaseSq, nuS = 2.0;
-
+double nuS = 2.0;
 //classic functions :
 double ss(const vect& myVec){ //sum of square
   return sum(myVec*myVec);
@@ -91,13 +40,10 @@ vect Usolve(const matrix& A,const vect& b, int transpose){
 }
 
 //auxilliary functions
-void get_proj(matrix& x, vect& proj, int nobs, int nvar, vect& px){
+void get_proj(matrix& x, vect& proj, int nobs, vect& px){
   
 	int i;
-	//cprod(x, proj, nvar, nobs, px);	
   px = cprod(x,proj);
-//	double pmin = f_min(px, nobs);
-//	double pmax = f_max(px, nobs);
 	double pmin = px.min();
 	double pmax = px.max();
 	double pmid = 0.5 * (pmin + pmax);
@@ -107,7 +53,6 @@ void get_proj(matrix& x, vect& proj, int nobs, int nvar, vect& px){
 	px[i++] = pmid;
 	px[i++] = pwid;
 }
-
 
 double bigQ(double x){
   double a = R::qt(x, 1.0, 1, 0);
@@ -131,8 +76,10 @@ void lpost(matrix& xMat, vect& y,
            int doBet0, int toPrint,
            //added
            matrix& eta,vect& eta_cond,
-           matrix& qd,vect& pgrid
+           matrix& qd,vect& pgrid, ivect& nrep,
+           const ivect& dims, const vect& hpar
 					 ){
+  
 	int g, k, k2, n, j, skip;
 	double q_curr, q_last;
 	double vp, va0, va1;
@@ -140,8 +87,11 @@ void lpost(matrix& xMat, vect& y,
 	if(doBet0){
     p0x = cprod(xMat,bet0);
 	}
-			
-			
+  int nobs = dims[0];
+	int nnode = dims[1];
+  int ngrid = dims[2];
+  int nvar = dims[4];
+  
 	if(doMat){
 		for(k = 0; k < nnode; k++){
 			for(k2 = 0; k2 < k; k2++){
@@ -200,11 +150,20 @@ void lpost(matrix& xMat, vect& y,
 	}
 	
 	if(doProj){
-		get_proj(xMat, proj, nobs, nvar, px);
+		get_proj(xMat, proj,nobs, px);
 	}
 			
-
-	double alph, r;
+  double nuL = hpar[0];
+	double muL = hpar[0] * hpar[1];
+	double nuBp = hpar[2];
+	double muBp = hpar[3];
+	double nuBa = hpar[4];
+	double muBa = hpar[5];
+	double muBase = hpar[6];
+  double incr = 1.0 / ((double)ngrid - 1.0);
+  double  lincr = log(incr);
+	
+  double alph, r;
 	skip = 0;
 	double bigQ_anchor[] = {0.0, 0.0};
 	for(loglik = 0.0, n = 0; n < nobs; n++){
@@ -249,7 +208,9 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 					 vect& st_loglik, vect& st_logpost, vect& st_logdetR, 
 					 vect& acpt, int doRho, int doBase, vect& tuneBase, vect& acptBase,
            //added
-           matrix& eta, vect& eta_cond,matrix& qd, vect& pgrid
+           matrix& eta, vect& eta_cond,matrix& qd, vect& pgrid,
+           ivect& nrep,vect& betBase,
+           const ivect& dims, const vect& hpar
 					 ){
 	
 	int m, k, skipB = 0, skip = 0, skip_om = 0, skip_xi = 0, skip_proj = 0, skip_px = 0, skip_theta = 0;
@@ -257,6 +218,11 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
   vect loglik(2);
 	vect logpost(2);
 	vect logdetR(2);
+  int nobs = dims[0];
+  int nnode = dims[1];
+  int ngrid = dims[2];
+  int nsweep = dims[3];
+  int nvar = dims[4];
   
 	twoVect xi(2,vect(nnode));
 	twoVect rxi(2,vect(nnode));
@@ -264,9 +230,8 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 	twoVect p0x(2,vect(nobs));
   
 	array3d q(2,matrix(2,ngrid)) ;
-
+  
 	double mu0 = theta[0];
-  //double *bet0 = theta + 1;
   vect bet0(nvar);
   for(int j = 0; j < nvar; j++) bet0[j] = theta[j+1];
   double sigmaCom = theta[nvar + 1], rho = theta[nvar + 2];
@@ -288,11 +253,14 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 				px[holdP], cmat_node[holdB], cmat_grid[holdB], logdetR[holdB],
 				xi[holdBW], rxi[holdBW], q[holdBW], p0x[hold_base],
 				loglik[hold], logpost[hold],
-				1, 1, 1, 1, 0,eta,eta_cond,qd,pgrid);
+				1, 1, 1, 1, 0,eta,eta_cond,qd,pgrid,nrep,dims,hpar);
 	
 	Rprintf("Initialized at: loglik = %g\tlogpost = %g\n", loglik[hold], logpost[hold]);
 	double u0, u1;
 	
+  double muBase = hpar[6];
+  double sigmaBase = hpar[7 + nvar];
+  double sigmaBaseSq = sigmaBase * sigmaBase;
 	for(m = 0; m < nsweep; m++){
 		
 		
@@ -312,7 +280,7 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 					px[holdP], cmat_node[holdB], cmat_grid[holdB], logdetR[holdB],
 					xi[propBW], rxi[propBW], q[propBW], p0x[hold_base],
 					loglik[prop], logpost[prop],
-					0, 1, 0, 0, 0,eta,eta_cond,qd,pgrid);
+					0, 1, 0, 0, 0,eta,eta_cond,qd,pgrid,nrep,dims,hpar);
 		
 		if(log(R::runif(0.0, 1.0)) < (logpost[prop] - logpost[hold])){
 			holdBW = propBW; 
@@ -341,7 +309,7 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 					px[holdP], cmat_node[propB], cmat_grid[propB], logdetR[propB],
 					xi[propBW], rxi[propBW], q[propBW], p0x[hold_base],
 					loglik[prop], logpost[prop],
-					1, 1, 0, 0, 0,eta,eta_cond,qd,pgrid);
+					1, 1, 0, 0, 0,eta,eta_cond,qd,pgrid,nrep,dims,hpar);
 		
 		if(log(R::runif(0.0, 1.0)) < (logpost[prop] - logpost[hold] + u)){
 			holdB = propB;
@@ -367,7 +335,7 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 					px[holdP], cmat_node[propB], cmat_grid[propB], logdetR[propB],
 					xi[propBW], rxi[propBW], q[propBW], p0x[hold_base],
 					loglik[prop], logpost[prop],
-					1, 1, 0, 0, 0,eta,eta_cond,qd,pgrid);
+					1, 1, 0, 0, 0,eta,eta_cond,qd,pgrid,nrep,dims,hpar);
 		
 		if(log(R::runif(0.0, 1.0)) < (logpost[prop] - logpost[hold] + u)){
 			holdB = propB;
@@ -397,7 +365,7 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 						px[propP], cmat_node[holdB], cmat_grid[holdB], logdetR[holdB],
 						xi[holdBW], rxi[holdBW], q[holdBW], p0x[hold_base],
 						loglik[prop], logpost[prop],
-						0, 0, 1, 0, 0,eta,eta_cond,qd,pgrid);
+						0, 0, 1, 0, 0,eta,eta_cond,qd,pgrid,nrep,dims,hpar);
 			
 			if(log(R::runif(0.0, 1.0)) < (logpost[prop] - logpost[hold])){
 				holdP = propP;
@@ -426,7 +394,7 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 						px[holdP], cmat_node[holdB], cmat_grid[holdB], logdetR[holdB],
 						xi[holdBW], rxi[holdBW], q[holdBW], p0x[hold_base],
 						loglik[prop], logpost[prop],
-						0, 0, 0, 0, 0,eta,eta_cond,qd,pgrid);
+						0, 0, 0, 0, 0,eta,eta_cond,qd,pgrid,nrep,dims,hpar);
 			
 			if( log(R::runif(0.0, 1.0)) < (logpost[prop] - logpost[hold] + u) ){
 				hold  = prop;
@@ -477,7 +445,7 @@ void sweep(matrix& xMat, vect& y, vect& pnodes, vect& anodes,
 						px[holdP], cmat_node[holdB], cmat_grid[holdB], logdetR[holdB],
 						xi[holdBW], rxi[holdBW], q[holdBW], p0x[prop_base],
 						loglik[prop], logpost[prop],
-						0, 0, 0, (move == 1), 0,eta,eta_cond,qd,pgrid);
+						0, 0, 0, (move == 1), 0,eta,eta_cond,qd,pgrid,nrep,dims,hpar);
 			
 			if(log(R::runif(0.0, 1.0)) < (logpost[prop] - logpost[hold] + u)){
 				hold = prop;
@@ -542,14 +510,20 @@ void mcmc(vect& x, vect& y, vect& pnodes, vect& anodes,
 					vect& st_b2, vect& st_xi, vect& st_omega, 
 					vect& st_proj, vect& st_px, vect& st_theta,
 					vect& st_loglik, vect& st_logpost, vect& st_logdetR,
-					vect& acpt, int doRho, int doBase, vect& tuneBase, vect& acptBase
+					vect& acpt, int doRho, int doBase, vect& tuneBase, vect& acptBase,
+          ivect& nrep, vect& betBase,
+          const ivect& dims, const vect& hpar
 					){
 
 	int k, k2, g, i;
 	double vp, va0, va1;
 	
-	//double **xMat = setmem(2, nvar, nobs);
-  matrix xMat(2,nvar);
+  int nobs = dims[0];
+	int nnode = dims[1];
+	int ngrid = dims[2];
+  int nvar = dims[4];
+  
+  matrix xMat(nvar,nobs);
 	int skip_x = 0;
 	for(k = 0; k < nvar; k++){
 		for(i = 0; i < nobs; i++){
@@ -559,6 +533,7 @@ void mcmc(vect& x, vect& y, vect& pnodes, vect& anodes,
 	}
 
 	//pgrid = setmem(1, ngrid);
+  double incr = 1.0 / ((double)ngrid - 1.0);
   vect pgrid(ngrid,0.0);
 	for(g = 1; g < ngrid; g++)
 		pgrid[g] = pgrid[g - 1] + incr;
@@ -578,148 +553,61 @@ void mcmc(vect& x, vect& y, vect& pnodes, vect& anodes,
 				st_b2, st_xi, st_omega, st_proj, st_px, st_theta,
 				st_loglik, st_logpost, st_logdetR,
 				acpt, doRho, doBase, tuneBase, acptBase,
-        eta,eta_cond,qd,pgrid);
+        eta,eta_cond,qd,pgrid,nrep,betBase,dims,hpar);
 	PutRNGstate();
 }
 
-void initialize_ljqrf(int * dims,
-                      NumericVector& hpar
+void initialize_ljqrf(const ivect& dims,
+                      const vect& hpar,
+                      ivect& nrep,
+                      vect& betBase
   										){
 
-	nobs = dims[0];
-	nnode = dims[1];
-	ngrid = dims[2];
-	nsweep = dims[3];
-	nvar = dims[4];
-	nrep = dims + 5;
-	gAnchor = ngrid / 2;
+//	nobs = dims[0];
+//	nnode = dims[1];
+//	ngrid = dims[2];
+//	nsweep = dims[3];
+//	nvar = dims[4];
+  for(int i = 0; i < dims.size()-5; i++) nrep[i] = dims[i+5];
+//	gAnchor = ngrid / 2;
 	
-	incr = 1.0 / ((double)ngrid - 1.0);
-	lincr = log(incr);
-	
-	nuL = hpar[0];
-	muL = hpar[0] * hpar[1];
-	nuBp = hpar[2];
-	muBp = hpar[3];
-	nuBa = hpar[4];
-	muBa = hpar[5];
-	muBase = hpar[6];
-	betBase = hpar + 7;
-	sigmaBase = hpar[7 + nvar];
-	sigmaBaseSq = sigmaBase * sigmaBase;
+//	incr = 1.0 / ((double)ngrid - 1.0);
+//	lincr = log(incr);
+//	
+//	nuL = hpar[0];
+//	muL = hpar[0] * hpar[1];
+//	nuBp = hpar[2];
+//	muBp = hpar[3];
+//	nuBa = hpar[4];
+//	muBa = hpar[5];
+//	muBase = hpar[6];
+//  betBase
+  for(int i = 0; i < hpar.size()-7 ; i++) betBase[i] = hpar[i+7];
+//	sigmaBase = hpar[7 + nvar];
+//	sigmaBaseSq = sigmaBase * sigmaBase;
 	
 }
 
 // [[Rcpp::export]]
-void slqr(NumericVector x, NumericVector y, int * dims, NumericVector pnodes, NumericVector anodes,
-      		NumericVector hpar, NumericVector tune, NumericVector theta,
-					NumericVector b2, NumericVector omega, NumericVector proj, 
-					NumericVector st_b2, NumericVector st_xi, NumericVector st_omega, 
-					NumericVector st_proj, NumericVector st_px, NumericVector st_theta,
-					NumericVector st_loglik, NumericVector st_logpost, NumericVector st_logdetR,
-					NumericVector acpt, int *doRho, int *doBase, NumericVector tuneBase, NumericVector acptBase
+void slqr(vect x, vect y, ivect dims, vect pnodes, vect anodes,
+      		vect hpar, vect tune, vect theta,
+					vect b2, vect omega, vect proj, 
+					vect st_b2, vect st_xi, vect st_omega, 
+					vect st_proj, vect st_px, vect st_theta,
+					vect st_loglik, vect st_logpost, vect st_logdetR,
+					vect acpt, ivect doRho, ivect doBase, vect tuneBase, vect acptBase
 				 ){
-	initialize_ljqrf(dims, hpar);
-	Rprintf("Parameters: nuL = %g, muL = %g, nuBp = %g, muBp = %g, nuBa = %g, muBa = %g\n",
-					nuL, muL, nuBp, muBp, nuBa, muBa);
+  ivect nrep(dims.size()-5);
+  vect betBase(hpar.size()-7);
+	initialize_ljqrf(dims, hpar,nrep,betBase);
+  
+  
+	//Rprintf("Parameters: nuL = %g, muL = %g, nuBp = %g, muBp = %g, nuBa = %g, muBa = %g\n",
+	//				nuL, muL, nuBp, muBp, nuBa, muBa);
 	mcmc(x, y, pnodes, anodes, tune, b2, omega, proj, theta,
 			 st_b2, st_xi, st_omega, st_proj, st_px, st_theta,
 			 st_loglik, st_logpost, st_logdetR,
-			 acpt, doRho[0], doBase[0], tuneBase, acptBase);
+			 acpt, doRho[0], doBase[0], tuneBase, acptBase,nrep,betBase,
+       dims,hpar);
 	
 }
-
-/*
-void getq(vect& pnodes,
-					vect& anodes,
-					vect& b2,
-					vect& xi,
-					vect& q0,
-					vect& q1,
-          matrix& eta,vect& eta_cond,matrix& q,matrix& qd,vect& pgrid,matrix& cmat_grid
-					){
-	
-	int g, k, n;
-	double vp, va0, va1;
-	
-	for(k = 0; k < nnode; k++){
-		va0 = b2[1] * anodes[k]*anodes[k];
-		va1 = b2[1] * (anodes[k] - 1.0)*(anodes[k] - 1.0);
-		for(g = 0; g < ngrid; g++){
-			vp = b2[0] * (pnodes[k] - pgrid[g])*(pnodes[k] - pgrid[g]);
-			cmat_grid[k,g] = exp(- vp - va0);
-			cmat_grid[k,ngrid + g] = exp(- vp - va1);
-		}
-	}
-	
-	
-	for(g = 0; g < ngrid; g++){
-		for(eta[0,g] = 0.0, k = 0; k < nnode; k++)
-			eta[0,g] += xi[k] * cmat_grid[k,g];
-		
-		for(eta[1,g] = 0.0, k = 0; k < nnode; k++)
-			eta[1,g] += xi[k] * cmat_grid[k,ngrid + g];
-	}
-	
-	eta_cond[0] = max(eta.row(0));
-	eta_cond[1] = max(eta.row(1));
-	
-	for(g = 0; g < ngrid; g++){
-		qd[0,g] = exp(eta[0,g] - eta_cond[0]);
-		qd[1,g] = exp(eta[1,g] - eta_cond[1]);
-	}
-	
-	for(q[0,0] = 0.0, g = 1; g < ngrid; g++)
-		q[0,g] = q[0,g - 1] + 0.5 * (qd[0,g - 1] + qd[0,g]);
-	for(q[1,0] = 0.0, g = 1; g < ngrid; g++)
-		q[1,g] = q[1,g - 1] + 0.5 * (qd[1,g - 1] + qd[1,g]);
-	
-	for(g = 0; g < ngrid; g++){
-		q0[g] = q[0,g] / q[0,ngrid - 1];
-		q1[g] = q[1,g] / q[1,ngrid - 1];
-	}
-	
-}
-
-void fit(int *dims,
-				 vect& pnodes,
-				 vect& anodes,
-				 vect& b2,
-				 vect& xi,
-				 vect& st_q,
-         //
-         matrix& cmat_grid,vect& pgrid
-				 ){
-	
-	nnode = dims[0];
-	ngrid = dims[1];
-	nsweep = dims[2];
-		
-	incr = 1.0 / ((double)ngrid - 1.0);
-	
-	int k, k2, g, m;
-	
-	//pgrid = (double *)calloc(ngrid, sizeof(double));
-	//for(pgrid[0] = 0.0, g = 1; g < ngrid; g++)
-		//pgrid[g] = pgrid[g - 1] + incr;
-	//int twongrid = 2 * ngrid;
-	
-	//cmat_grid = (double **)calloc(nnode, sizeof(double *));
-	//for(k = 0; k < nnode; k++)
-		//cmat_grid[k] = (double *)calloc(twongrid, sizeof(double));
-
-   matrix eta(2,ngrid);
-   vect eta_cond(2);
-   matrix qd(2,ngrid);
-   matrix q(2,ngrid);
-   
-	int b2_skip = 0, xi_skip = 0, q0_skip = 0, q1_skip = ngrid;
-	for(m = 0; m < nsweep; m++){
-		getq(pnodes, anodes, b2 + b2_skip, xi + xi_skip, st_q + q0_skip, st_q + q1_skip,eta,eta_cond,q,qd,cmat_grid);
-		b2_skip += 2;
-		xi_skip += nnode;
-		q0_skip += twongrid;
-		q1_skip += twongrid;
-	}
-}
-*/

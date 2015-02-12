@@ -2,7 +2,7 @@ source("slqr.r")
 load("tropcycl.rd")
 
 #install.packages("Rcpp", dependencies = TRUE)
-install.packages("RcppArmadillo", dependencies = TRUE)
+#install.packages("RcppArmadillo", dependencies = TRUE)
 library(Rcpp)
 library(RcppArmadillo)
 Rcpp::sourceCpp("modifiedCode.cpp")
